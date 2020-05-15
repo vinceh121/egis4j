@@ -1,6 +1,8 @@
 package me.vinceh121.egis0570.playground;
 
 import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.Point;
 import java.awt.event.MouseAdapter;
@@ -10,10 +12,17 @@ import java.awt.image.DataBufferByte;
 import java.awt.image.Raster;
 import java.io.IOException;
 
+import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JOptionPane;
+import javax.swing.JSlider;
+import javax.swing.JTextField;
+import javax.swing.JToggleButton;
 import javax.swing.Timer;
 
 import me.vinceh121.egis0570.Egis;
+import me.vinceh121.egis0570.Egis.EgisMode;
 
 public class FingerprintView extends JFrame {
 	private static final long serialVersionUID = -3376973889631479859L;
@@ -28,100 +37,125 @@ public class FingerprintView extends JFrame {
 
 	public FingerprintView() {
 		setDefaultCloseOperation(EXIT_ON_CLOSE);
+		setLayout(new FlowLayout());
 
 		final Egis egis = new Egis();
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> egis.terminate()));
 		egis.init();
-		try {
-			data = egis.readFingerprint();
-		} catch (IOException e2) {
-			e2.printStackTrace();
-		}
+		egis.setDefaultsForReading();
+
+		final FingerprintComponent fpc = new FingerprintComponent();
+		add(fpc);
+
+		final JButton btnRegis = new JButton("Edit register value");
+		btnRegis.addActionListener(e -> {
+			int reg = Integer.parseInt(JOptionPane.showInputDialog("Register (hex, no prefix):"), 16);
+			int val = Integer.parseInt(
+					JOptionPane.showInputDialog("Value for " + Integer.toHexString(reg) + " (hex, no prefix):"),
+					16);
+			egis.writeRegister(reg, val);
+		});
+		add(btnRegis);
+
+		final JSlider slGain = new JSlider(0, Byte.MAX_VALUE);
+		slGain.setToolTipText("Small gain");
+		slGain.setValue(egis.getSmallGain());
+		slGain.addChangeListener(e -> {
+			egis.setSmallGain(slGain.getValue());
+		});
+		add(slGain);
+
+		final JTextField flWidth = new JTextField(String.valueOf(Egis.IMG_WIDTH));
+		flWidth.addActionListener(e -> {
+			fpc.setWidth(Integer.parseInt(flWidth.getText()));
+		});
+		add(flWidth);
+
+		final JTextField flHeight = new JTextField(String.valueOf(Egis.IMG_HEIGHT));
+		flHeight.addActionListener(e -> {
+			fpc.setHeight(Integer.parseInt(flHeight.getText()));
+		});
+		add(flHeight);
+
+		final JToggleButton tglStatus = new JToggleButton("Finger detected");
+		tglStatus.setEnabled(false);
+		add(tglStatus);
+
+		final JButton btnMode = new JButton(String.valueOf(egis.getMode()));
+		btnMode.addActionListener(e -> {
+			final int choice = JOptionPane.showOptionDialog(null,
+					"Choose a mode",
+					"Egis mode",
+					JOptionPane.OK_CANCEL_OPTION,
+					JOptionPane.QUESTION_MESSAGE,
+					null,
+					EgisMode.values(),
+					null);
+			if (choice == -1)
+				return;
+			egis.setMode(EgisMode.values()[choice]);
+		});
+		add(btnMode);
 
 		final Timer timer = new Timer(100, e -> {
 			try {
-				System.out.println("Getting...");
-				data = egis.repeatFingerprint();
-				fingerState = egis.fingerStatus(data);
-				// if (fingerState)
+				data = egis.requestFlyEstimation();
+				tglStatus.setText(String.valueOf(egis.fingerStatus()));
 				repaint();
-				System.out.println("Done!\n");
 			} catch (IOException e1) {
 				e1.printStackTrace();
 			}
 		});
 
 		timer.start();
-		addMouseListener(new MouseAdapter() {
-			@Override
-			public void mouseClicked(MouseEvent e) {
-				if (timer.isRunning())
-					timer.stop();
-				else
-					timer.start();
-			}
-		});
 	}
 
-	@Override
-	public void paint(Graphics g) {
-		super.paint(g);
-		if (data == null)
-			return;
+	class FingerprintComponent extends JComponent {
+		private static final long serialVersionUID = 5842761368020689137L;
 
-		g.setColor(fingerState ? Color.RED : Color.BLACK);
-		g.drawRect(0, 0, getWidth(), getHeight());
+		private int width = 114;
+		private int height = 285;
 
-		final int width = 114;
-		final int height = 285;
+		public FingerprintComponent() {
+			setPreferredSize(new Dimension(Egis.IMG_WIDTH, Egis.IMG_HEIGHT));
+		}
 
-		final BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
+		@Override
+		public void paint(Graphics g) {
+			super.paint(g);
+			if (data == null)
+				return;
 
-		final DataBufferByte buf = new DataBufferByte(data, 32512);
-		final Raster raster = Raster.createPackedRaster(buf, width, height, 8, new Point());
-		img.setData(raster);
+			g.setColor(fingerState ? Color.RED : Color.BLACK);
+			g.drawRect(0, 0, getWidth(), getHeight());
 
-		g.drawImage(img, 0, 0, this);
-		System.out.println(img.getHeight());
+			try {
+				final BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
+
+				final DataBufferByte buf = new DataBufferByte(data, Egis.IMG_SIZE);
+				final Raster raster = Raster.createPackedRaster(buf, width, height, 8, new Point());
+				img.setData(raster);
+
+				g.drawImage(img, 0, 0, this);
+			} catch (Exception e) {}
+
+		}
+
+		public int getWidth() {
+			return width;
+		}
+
+		public void setWidth(int width) {
+			this.width = width;
+		}
+
+		public int getHeight() {
+			return height;
+		}
+
+		public void setHeight(int height) {
+			this.height = height;
+		}
 	}
 
-	// @Override
-	// public void paint(Graphics g) {
-	// if (data == null)
-	// return;
-	//
-	// g.setColor(fingerState ? Color.RED : Color.BLACK);
-	// g.drawRect(0, 0, getWidth(), getHeight());
-	//
-	// final int width = 114;
-	// final int height = 285;
-	//
-	// int maxWidth = 0;
-	// int maxHeight = 0;
-	//
-	// int i = 0;
-	// for (int x = 0; x < height; x++) {
-	// for (int y = 0; y < width; y++, i++) {
-	// try {
-	// final int d = data[i];
-	// g.setColor(new Color(d));
-	// g.drawRect(x, y, 1, 1);
-	// } catch (ArrayIndexOutOfBoundsException e) {
-	// System.err.println("i = " + i);
-	// }
-	// maxWidth = Math.max(maxWidth, width);
-	// maxHeight = Math.max(maxHeight, height);
-	// }
-	// }
-	// System.out.println("max w: " + maxWidth);
-	// System.out.println("max h: " + maxHeight);
-	// }
-
-	@Override
-	public void paintAll(Graphics g) {
-	}
-
-	@Override
-	public void paintComponents(Graphics g) {
-	}
 }
